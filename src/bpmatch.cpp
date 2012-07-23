@@ -4,9 +4,9 @@
  * with minimum length "l", with at least "minRep" occurrences in S,
  * possibly overlapped, and, in such a maximum coverage, minimize the
  * number of subsequences used.
- * version 1.5
+ * version 1.6
  *
- * Copyright (C) 2003-2011 Claudio Felicioli
+ * Copyright (C) 2003-2012 Claudio Felicioli
  * mail: c.felicioli@1d20.net - pangon@gmail.com
  *
  * bpmatch is free software; you can redistribute it and/or modify
@@ -94,16 +94,16 @@ int main(int argc, char *argv[]) {
 		printf("usage: %s sourceGeneSuffixTree reverseSourceGeneSuffixTree TargetGene minimumLength minimumRepetition [outputFile]\n", argv[0]);
 		exit(EXIT_FAILURE);
 		}
-	strncpy(st_fileName, argv[1], 48);
+	strncpy(st_fileName, argv[1], 49);
 	st_fileName[49]='\0';
-	strncpy(rst_fileName, argv[2], 48);
+	strncpy(rst_fileName, argv[2], 49);
 	rst_fileName[49]='\0';
-	strncpy(target_fileName, argv[3], 48);
+	strncpy(target_fileName, argv[3], 49);
 	target_fileName[49]='\0';
 
 	fileoutput=(argc==7);
 	if(fileoutput) {
-		strncpy(output_fileName, argv[6], 98);
+		strncpy(output_fileName, argv[6], 99);
 		output_fileName[99]='\0';
 		if((output_file=fopen(output_fileName, "w"))==NULL) {
 			fprintf(stderr, "error: %s opening fail\n", output_fileName);
@@ -129,9 +129,15 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "error: %s opening fail\n", st_fileName);
 		exit(EXIT_FAILURE);
 		}
-	fread(&(stringLength), sizeof(int), 1, st_file);
+	if(fread(&(stringLength), sizeof(int), 1, st_file)!=1) {
+		fprintf(stderr, "failed fread of stringLength\n");
+		exit(EXIT_FAILURE);
+		}
 	s=new bpmatch_utils_base[stringLength];
-	fread(s, sizeof(bpmatch_utils_base), stringLength, st_file);
+	if((int)fread(s, sizeof(bpmatch_utils_base), stringLength, st_file)!=stringLength) {
+		fprintf(stderr, "failed fread of source string\n");
+		exit(EXIT_FAILURE);
+		}
 	st_root=new st_node;
 	st_leaves=new st_node*[stringLength+2];
 	st_unserialize_node(st_file, st_root, st_leaves);
@@ -157,9 +163,15 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "error: %s opening fail\n", rst_fileName);
 		exit(EXIT_FAILURE);
 		}
-	fread(&(stringLength), sizeof(int), 1, rst_file);
+	if(fread(&(stringLength), sizeof(int), 1, rst_file)!=1) {
+		fprintf(stderr, "failed fread of (reversed) stringLength\n");
+		exit(EXIT_FAILURE);
+		}
 	rs=new bpmatch_utils_base[stringLength];
-	fread(rs, sizeof(bpmatch_utils_base), stringLength, rst_file);
+	if((int)fread(rs, sizeof(bpmatch_utils_base), stringLength, rst_file)!=stringLength) {
+		fprintf(stderr, "failed fread of (reversed) source string\n");
+		exit(EXIT_FAILURE);
+		}
 	rst_root=new st_node;
 	rst_leaves=new st_node*[stringLength+2];
 	st_unserialize_node(rst_file, rst_root, rst_leaves);
@@ -212,7 +224,8 @@ int main(int argc, char *argv[]) {
 //	printf("*************************************************\n");
 	bool end=false;
 	bool found, foundR;
-	int shiftTo, shiftToR;
+	int shiftTo=0;
+	int shiftToR=0;
 	bool dontdo=false;
 	bool dontdoR=false;
 	int maxPrefix, maxSuffix;
@@ -485,7 +498,10 @@ int main(int argc, char *argv[]) {
 	}
 
 void intestation() {
-	system("clear");
+	if(system("clear")==-1) {
+		fprintf(stderr, "failed system call\n");
+		exit(EXIT_FAILURE);
+		}
 	printf("/*\n");
 	printf(" * bpmatch calculate, from sequences S and T, the maximum coverage of T\n");
 	printf(" * using only subsequences and complemented reversed subsequences of S,\n");
@@ -513,14 +529,29 @@ void intestation() {
 	}
 
 void st_unserialize_node(FILE* file, st_node* node, st_node** leaves) {
-	fread(&(node->length), sizeof(int), 1, file);
-	fread(&(node->leafId), sizeof(int), 1, file);
+	if(fread(&(node->length), sizeof(int), 1, file)!=1) {
+		fprintf(stderr, "failed st_unserialize_node of length\n");
+		exit(EXIT_FAILURE);
+		}
+	if(fread(&(node->leafId), sizeof(int), 1, file)!=1) {
+		fprintf(stderr, "failed st_unserialize_node of leafId\n");
+		exit(EXIT_FAILURE);
+		}
 	if(node->leafId!=0) leaves[node->leafId]=node;
-	fread(&(node->firstLeaf), sizeof(int), 1, file);
-	fread(&(node->lastLeaf), sizeof(int), 1, file);
+	if(fread(&(node->firstLeaf), sizeof(int), 1, file)!=1) {
+		fprintf(stderr, "failed st_unserialize_node of firstLeaf\n");
+		exit(EXIT_FAILURE);
+		}
+	if(fread(&(node->lastLeaf), sizeof(int), 1, file)!=1) {
+		fprintf(stderr, "failed st_unserialize_node of lastLeaf\n");
+		exit(EXIT_FAILURE);
+		}
 	bool presence;
 	for(int i=0;i<5;i++) {
-		fread(&presence, sizeof(bool), 1, file);
+		if(fread(&presence, sizeof(bool), 1, file)!=1) {
+			fprintf(stderr, "failed st_unserialize_node of presence\n");
+			exit(EXIT_FAILURE);
+			}
 		if(presence) {
 			node->edges[i]=new st_edge;
 			st_unserialize_edge(file, node->edges[i], leaves);
@@ -530,9 +561,18 @@ void st_unserialize_node(FILE* file, st_node* node, st_node** leaves) {
 	}
 
 void st_unserialize_edge(FILE* file, st_edge* edge, st_node** leaves) {
-	fread(&(edge->count), sizeof(int), 1, file);
-	fread(&(edge->start), sizeof(int), 1, file);
-	fread(&(edge->end), sizeof(int), 1, file);
+	if(fread(&(edge->count), sizeof(int), 1, file)!=1) {
+		fprintf(stderr, "failed st_unserialize_edge of count\n");
+		exit(EXIT_FAILURE);
+		}
+	if(fread(&(edge->start), sizeof(int), 1, file)!=1) {
+		fprintf(stderr, "failed st_unserialize_edge of start\n");
+		exit(EXIT_FAILURE);
+		}
+	if(fread(&(edge->end), sizeof(int), 1, file)!=1) {
+		fprintf(stderr, "failed st_unserialize_edge of end\n");
+		exit(EXIT_FAILURE);
+		}
 	edge->to=new st_node;
 	st_unserialize_node(file, edge->to, leaves);
 	}

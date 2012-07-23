@@ -144,9 +144,13 @@ void base_copy(void* a, void* b) {
 	}
 
 char* base_print(LST_StringIndex *index) {
-	if(index->start_index==index->string->num_items-1) return("<eos>");
+	if(index->start_index==index->string->num_items-1) {
+		char* out=new char[6];
+		snprintf(out, 6, "<eos>");
+		return(out);
+		}
 	char* out=new char[100];
-	for(int i=index->start_index;i<=*(index->end_index);i++) out[i-index->start_index]=base2char[s[i]];
+	for(unsigned int i=index->start_index;i<=*(index->end_index);i++) out[i-index->start_index]=base2char[s[i]];
 	out[*(index->end_index)-index->start_index+1]='\0';
 	return(out);
 	}

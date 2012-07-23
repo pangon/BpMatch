@@ -179,23 +179,44 @@ void recCount(st_node* node) {
 	}
 
 void st_unserialize(void) {
-	fread(&(stringLength), sizeof(int), 1, st_file);
+	if(fread(&(stringLength), sizeof(int), 1, st_file)!=1) {
+		fprintf(stderr, "failed st_unserialize of stringLength\n");
+		exit(EXIT_FAILURE);
+		}
 	s=new bpmatch_utils_base[stringLength];
-	fread(s, sizeof(bpmatch_utils_base), stringLength, st_file);
+	if((int)fread(s, sizeof(bpmatch_utils_base), stringLength, st_file)!=stringLength) {
+		fprintf(stderr, "failed st_unserialize of string\n");
+		exit(EXIT_FAILURE);
+		}
 	root=new st_node;
 	leaves=new st_node*[stringLength+2];
 	st_unserialize_node(root);
 	}
 
 void st_unserialize_node(st_node* node) {
-	fread(&(node->length), sizeof(int), 1, st_file);
-	fread(&(node->leafId), sizeof(int), 1, st_file);
+	if(fread(&(node->length), sizeof(int), 1, st_file)!=1) {
+		fprintf(stderr, "failed st_unserialize_node of length\n");
+		exit(EXIT_FAILURE);
+		}
+	if(fread(&(node->leafId), sizeof(int), 1, st_file)!=1) {
+		fprintf(stderr, "failed st_unserialize_node of leafId\n");
+		exit(EXIT_FAILURE);
+		}
 	if(node->leafId!=0) leaves[node->leafId]=node;
-	fread(&(node->firstLeaf), sizeof(int), 1, st_file);
-	fread(&(node->lastLeaf), sizeof(int), 1, st_file);
+	if(fread(&(node->firstLeaf), sizeof(int), 1, st_file)!=1) {
+		fprintf(stderr, "failed st_unserialize_node of firstLeaf\n");
+		exit(EXIT_FAILURE);
+		}
+	if(fread(&(node->lastLeaf), sizeof(int), 1, st_file)!=1) {
+		fprintf(stderr, "failed st_unserialize_node of lastLeaf\n");
+		exit(EXIT_FAILURE);
+		}
 	bool presence;
 	for(int i=0;i<5;i++) {
-		fread(&presence, sizeof(bool), 1, st_file);
+		if(fread(&presence, sizeof(bool), 1, st_file)!=1) {
+			fprintf(stderr, "failed st_unserialize_node of presence\n");
+			exit(EXIT_FAILURE);
+			}
 		if(presence) {
 			node->edges[i]=new st_edge;
 			st_unserialize_edge(node->edges[i]);
@@ -205,9 +226,18 @@ void st_unserialize_node(st_node* node) {
 	}
 
 void st_unserialize_edge(st_edge* edge) {
-	fread(&(edge->count), sizeof(int), 1, st_file);
-	fread(&(edge->start), sizeof(int), 1, st_file);
-	fread(&(edge->end), sizeof(int), 1, st_file);
+	if(fread(&(edge->count), sizeof(int), 1, st_file)!=1) {
+		fprintf(stderr, "failed st_unserialize_edge of count\n");
+		exit(EXIT_FAILURE);
+		}
+	if(fread(&(edge->start), sizeof(int), 1, st_file)!=1) {
+		fprintf(stderr, "failed st_unserialize_edge of start\n");
+		exit(EXIT_FAILURE);
+		}
+	if(fread(&(edge->end), sizeof(int), 1, st_file)!=1) {
+		fprintf(stderr, "failed st_unserialize_edge of end\n");
+		exit(EXIT_FAILURE);
+		}
 	edge->to=new st_node;
 	st_unserialize_node(edge->to);
 	}
