@@ -30,7 +30,7 @@
 #include <math.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#define DEBUG (true)
+#define DEBUG (false)
 
 
 enum bpmatch_utils_base {A, G, T, C, X};
