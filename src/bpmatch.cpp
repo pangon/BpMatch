@@ -30,8 +30,10 @@
 #include <math.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#define DEBUG (false)
+#define DEBUG (true)
 
+
+enum bpmatch_utils_base {A, G, T, C, X};
 
 struct st_node;
 struct st_edge {
@@ -49,7 +51,16 @@ struct st_node {
 	int lastLeaf;
 	};
 
-enum bpmatch_utils_base {A, G, T, C, X};
+struct st_search {
+	st_node* current_node;
+	st_edge* current_edge;
+	int current_depth;
+	int current_edge_depth;
+	int current_count;
+	st_node* root;
+	bpmatch_utils_base* string;
+	};
+
 bpmatch_utils_base complement[5];
 char base2char[5];
 
@@ -61,49 +72,88 @@ void st_free_node(st_node* node);
 st_node* st_match(st_node* node, bpmatch_utils_base base, bpmatch_utils_base* string);
 int scanBp(FILE* file, bpmatch_utils_base* bp);
 void epilogo();
+bool composite_match(st_search* suffix_tree_a, st_search* suffix_tree_b, bpmatch_utils_base base);
+bool composite_match_target_check(st_search* suffix_tree_a, st_search* suffix_tree_b, st_search* suffix_tree_c, st_search* suffix_tree_d, bpmatch_utils_base base);
+int single_match(st_search* suffix_tree, bpmatch_utils_base base);
+void initialize_new_match(st_search* match_struct);
 
-//need for match
-st_edge* st_lastEdge;
-int st_matchTmp;
-int tmp_depth;
+int last_valid_direct_count;
+int last_valid_reverse_count;
+int last_valid_direct_count_target;
+int last_valid_reverse_count_target;
 
 char st_fileName[50];
 char rst_fileName[50];
+char st2_fileName[50];
+char rst2_fileName[50];
 char target_fileName[50];
 char output_fileName[100];
 int l;
 int minRep;
+int minRep2;
 FILE* st_file;
 FILE* rst_file;
+FILE* st2_file;
+FILE* rst2_file;
 FILE* target_file;
 FILE* output_file;
 int stringLength;
 bpmatch_utils_base* s;
 bpmatch_utils_base* rs;
 bpmatch_utils_base* t;
+bpmatch_utils_base* rt;
 st_node* st_root;
 st_node** st_leaves;
 st_node* rst_root;
 st_node** rst_leaves;
+st_node* st2_root;
+st_node** st2_leaves;
+st_node* rst2_root;
+st_node** rst2_leaves;
 int at;
 bool fileoutput;
 bool scanBp_fasta;
+bool check_target_repetitions;
 
 int main(int argc, char *argv[]) {
-	if(argc!=6 && argc!=7) {
+	if(argc!=6 && argc!=7 && argc!=8 && argc!=9) {
 		printf("usage: %s sourceGeneSuffixTree reverseSourceGeneSuffixTree TargetGene minimumLength minimumRepetition [outputFile]\n", argv[0]);
+		printf("       %s sourceGeneSuffixTree reverseSourceGeneSuffixTree TargetGeneSuffixTree reverseTargetGeneSuffixTree minimumLength minimumSourceRepetition minimumTargetRepetition [outputFile]\n", argv[0]);
 		exit(EXIT_FAILURE);
 		}
+
+	check_target_repetitions=(argc==8 || argc==9);
+
 	strncpy(st_fileName, argv[1], 49);
 	st_fileName[49]='\0';
 	strncpy(rst_fileName, argv[2], 49);
 	rst_fileName[49]='\0';
-	strncpy(target_fileName, argv[3], 49);
-	target_fileName[49]='\0';
 
-	fileoutput=(argc==7);
+	fileoutput=(argc==7 || argc==9);
+
+	if(check_target_repetitions) {
+		strncpy(st2_fileName, argv[3], 49);
+		st2_fileName[49]='\0';
+		strncpy(rst2_fileName, argv[4], 49);
+		rst2_fileName[49]='\0';
+
+		l=atoi(argv[5]);
+		minRep=atoi(argv[6]);
+		minRep2=atoi(argv[7]);
+
+		if(fileoutput) strncpy(output_fileName, argv[8], 99);
+		}
+	else {
+		strncpy(target_fileName, argv[3], 49);
+		target_fileName[49]='\0';
+
+		l=atoi(argv[4]);
+		minRep=atoi(argv[5]);
+
+		if(fileoutput) strncpy(output_fileName, argv[6], 99);
+		}
+
 	if(fileoutput) {
-		strncpy(output_fileName, argv[6], 99);
 		output_fileName[99]='\0';
 		if((output_file=fopen(output_fileName, "w"))==NULL) {
 			fprintf(stderr, "error: %s opening fail\n", output_fileName);
@@ -111,8 +161,6 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
-	l=atoi(argv[4]);
-	minRep=atoi(argv[5]);
 //	intestation();
 	complement[C]=G;
 	complement[G]=C;
@@ -192,124 +240,185 @@ int main(int argc, char *argv[]) {
 //	printf("\n");
 //	st_print(rst_root);
 //	printf("suffix tree unserialized.\n");
-	if((target_file=fopen(target_fileName, "r"))==NULL) {
-		fprintf(stderr, "error: %s opening fail\n", target_fileName);
-		exit(EXIT_FAILURE);
+
+	int trueStringLength;
+	if(check_target_repetitions) {
+//		printf("Loading %s.\n", st2_fileName);
+		if((st2_file=fopen(st2_fileName, "r"))==NULL) {
+			fprintf(stderr, "error: %s opening fail\n", st2_fileName);
+			exit(EXIT_FAILURE);
+			}
+		if(fread(&(stringLength), sizeof(int), 1, st2_file)!=1) {
+			fprintf(stderr, "failed fread of stringLength\n");
+			exit(EXIT_FAILURE);
+			}
+		t=new bpmatch_utils_base[stringLength];
+		if((int)fread(t, sizeof(bpmatch_utils_base), stringLength, st2_file)!=stringLength) {
+			fprintf(stderr, "failed fread of source string\n");
+			exit(EXIT_FAILURE);
+			}
+		trueStringLength=stringLength;
+		st2_root=new st_node;
+		st2_leaves=new st_node*[stringLength+2];
+		st_unserialize_node(st2_file, st2_root, st2_leaves);
+		int st2_file_fd;
+		if((st2_file_fd=fileno(st2_file))==-1) {
+			fprintf(stderr, "failed getting %s file descriptor", st2_fileName);
+			exit(EXIT_FAILURE);
+			}
+		if(fsync(st2_file_fd)!=0) {
+			fprintf(stderr, "failed fsync of %s", st2_fileName);
+			exit(EXIT_FAILURE);
+			}
+		if(fclose(st2_file)!=0) {
+			fprintf(stderr, "failed fclose of %s", st2_fileName);
+			exit(EXIT_FAILURE);
+			}
+//		printf("Loading %s.\n", rst2_fileName);
+		if((rst2_file=fopen(rst2_fileName, "r"))==NULL) {
+			fprintf(stderr, "error: %s opening fail\n", rst2_fileName);
+			exit(EXIT_FAILURE);
+			}
+		if(fread(&(stringLength), sizeof(int), 1, rst2_file)!=1) {
+			fprintf(stderr, "failed fread of (reversed) stringLength\n");
+			exit(EXIT_FAILURE);
+			}
+		rt=new bpmatch_utils_base[stringLength];
+		if((int)fread(rt, sizeof(bpmatch_utils_base), stringLength, rst2_file)!=stringLength) {
+			fprintf(stderr, "failed fread of (reversed) source string\n");
+			exit(EXIT_FAILURE);
+			}
+		rst2_root=new st_node;
+		rst2_leaves=new st_node*[stringLength+2];
+		st_unserialize_node(rst2_file, rst2_root, rst2_leaves);
+		int rst2_file_fd;
+		if((rst2_file_fd=fileno(rst2_file))==-1) {
+			fprintf(stderr, "failed getting %s file descriptor", rst2_fileName);
+			exit(EXIT_FAILURE);
+			}
+		if(fsync(rst2_file_fd)!=0) {
+			fprintf(stderr, "failed fsync of %s", rst2_fileName);
+			exit(EXIT_FAILURE);
+			}
+		if(fclose(rst2_file)!=0) {
+			fprintf(stderr, "failed fclose of %s", rst2_fileName);
+			exit(EXIT_FAILURE);
+			}
 		}
-	struct stat target_fileInfo;
-	stat(target_fileName, &target_fileInfo);
-	stringLength=target_fileInfo.st_size;
-	t=new bpmatch_utils_base[stringLength+1];
-	int trueStringLength=0;
-	bpmatch_utils_base bp;
-	scanBp_fasta=false;
-	while(scanBp(target_file, &bp)!=EOF) t[trueStringLength++]=bp;
-	t[trueStringLength++]=X;
-	int target_file_fd;
-	if((target_file_fd=fileno(target_file))==-1) {
-		fprintf(stderr, "failed getting gene file descriptor");
-		exit(EXIT_FAILURE);
+	else {
+		if((target_file=fopen(target_fileName, "r"))==NULL) {
+			fprintf(stderr, "error: %s opening fail\n", target_fileName);
+			exit(EXIT_FAILURE);
+			}
+		struct stat target_fileInfo;
+		stat(target_fileName, &target_fileInfo);
+		stringLength=target_fileInfo.st_size;
+		t=new bpmatch_utils_base[stringLength+1];
+		trueStringLength=0;
+		bpmatch_utils_base bp;
+		scanBp_fasta=false;
+		while(scanBp(target_file, &bp)!=EOF) t[trueStringLength++]=bp;
+		t[trueStringLength++]=X;
+		int target_file_fd;
+		if((target_file_fd=fileno(target_file))==-1) {
+			fprintf(stderr, "failed getting gene file descriptor");
+			exit(EXIT_FAILURE);
+			}
+		if(fsync(target_file_fd)!=0) {
+			fprintf(stderr, "failed fsync of gene");
+			exit(EXIT_FAILURE);
+			}
+		if(fclose(target_file)!=0) {
+			fprintf(stderr, "failed fclose of gene");
+			exit(EXIT_FAILURE);
+			}
 		}
-	if(fsync(target_file_fd)!=0) {
-		fprintf(stderr, "failed fsync of gene");
-		exit(EXIT_FAILURE);
-		}
-	if(fclose(target_file)!=0) {
-		fprintf(stderr, "failed fclose of gene");
-		exit(EXIT_FAILURE);
-		}
+
 //	printf("\n");
 //	printf("*************************************************\n");
 //	printf("matching - l=%d - minRep=%d\n", l, minRep);
 //	printf("*************************************************\n");
 	bool end=false;
-	bool found, foundR;
+	bool found;
 	int shiftTo=0;
-	int shiftToR=0;
-	bool dontdo=false;
-	bool dontdoR=false;
 	int maxPrefix, maxSuffix;
 	int state=0;
 	at=0;
 	int i;
-	st_node* tmp_node;
-//	int subSeqId=0;
 	int coverage=0;
+	st_search* search_source_direct=new st_search;
+	st_search* search_source_reverse=new st_search;
+	st_search* search_target_direct=new st_search;
+	st_search* search_target_reverse=new st_search;
+	search_source_direct->root=st_root;
+	search_source_direct->string=s;
+	search_source_reverse->root=rst_root;
+	search_source_reverse->string=rs;
+	if(check_target_repetitions) {
+		search_target_direct->root=st2_root;
+		search_target_direct->string=t;
+		search_target_reverse->root=rst2_root;
+		search_target_reverse->string=rt;
+		}
 	while(!end) {
 		found=false;
-		foundR=false;
 		if(state==0) {
 			//case 0
 			if(DEBUG) printf("case 0\n");
-			if(dontdo) dontdo=false;
-			else {
-				//searching for direct seq
-				if(DEBUG) printf("searching for direct seq...\n");
-				i=l-1;
-				//using reverse from actual+l-1 to actual (backward parsing)
-				tmp_node=rst_root;
-				tmp_depth=0;
-				st_matchTmp=0;
-				while(i>=0 && at+i<trueStringLength && (tmp_node=st_match(tmp_node, complement[t[at+i]], rs))!=NULL) i--;
-				if(i>=0) {
-					//not found
-					shiftTo=at+i+1;
-					if(DEBUG) printf("not found [%d -> %d]\n", at, shiftTo);
-					}
-				else {
-					//direct sequence found
-					i=0;
-					//using direct from actual (forward parsing)
-					tmp_node=st_root;
-					tmp_depth=0;
-					st_matchTmp=0;
-					while(at+i<trueStringLength && (tmp_node=st_match(tmp_node, t[at+i], s))!=NULL) i++;
-					found=true;
-					shiftTo=at+i;
-					if(DEBUG) printf("***************************************************found [%d -> %d]\n", at, shiftTo);
-					}
+			//searching for direct seq
+			i=l-1;
+			//using reverse from actual+l-1 to actual (backward parsing)
+			initialize_new_match(search_source_direct);
+			initialize_new_match(search_source_reverse);
+			if(check_target_repetitions) {
+				initialize_new_match(search_target_direct);
+				initialize_new_match(search_target_reverse);
+				while(i>=0 && at+i<trueStringLength && composite_match_target_check(search_source_direct, search_source_reverse, search_target_direct, search_target_reverse, complement[t[at+i]])) i--;
 				}
-			if(dontdoR) dontdoR=false;
 			else {
-				//searching for reverse seq
-				if(DEBUG) printf("searching for reverse seq...\n");
-				i=l-1;
-				//using direct from actual+l-1 to actual (backward parsing)
-				tmp_node=st_root;
-				tmp_depth=0;
-				st_matchTmp=0;
-				while(i>=0 && at+i<trueStringLength && (tmp_node=st_match(tmp_node, complement[t[at+i]], s))!=NULL) i--;
-				if(i>=0) {
-					//not found
-					shiftToR=at+i+1;
-					if(DEBUG) printf("not found [%d -> %d]\n", at, shiftToR);
+				while(i>=0 && at+i<trueStringLength && composite_match(search_source_direct, search_source_reverse, complement[t[at+i]])) i--;
+				}
+			if(i>=0) {
+				//not found
+				shiftTo=at+i+1;
+				if(DEBUG) printf("not found [%d -> %d]\n", at, shiftTo);
+				}
+			else {
+				//direct sequence found
+				i=0;
+				//using direct from actual (forward parsing)
+				initialize_new_match(search_source_direct);
+				initialize_new_match(search_source_reverse);
+				if(check_target_repetitions) {
+					initialize_new_match(search_target_direct);
+					initialize_new_match(search_target_reverse);
+					while(at+i<trueStringLength && composite_match_target_check(search_source_direct, search_source_reverse, search_target_direct, search_target_reverse, t[at+i])) i++;
 					}
 				else {
-					//reverse sequence found
-					i=0;
-					//using reverse from actual (forward parsing)
-					tmp_node=rst_root;
-					tmp_depth=0;
-					st_matchTmp=0;
-					while(at+i<trueStringLength && (tmp_node=st_match(tmp_node, t[at+i], rs))!=NULL) i++;
-					foundR=true;
-					shiftToR=at+i;
-					if(DEBUG) printf("##################################################found [%d -> %d]\n", at, shiftToR);
+					while(at+i<trueStringLength && composite_match(search_source_direct, search_source_reverse, t[at+i])) i++;
 					}
+				found=true;
+				shiftTo=at+i;
+				if(DEBUG) printf("***************************************************found [%d -> %d]\n", at, shiftTo);
 				}
 			}
 		else {
 			//case 1
 			if(DEBUG) printf("case 1\n");
 			//searching for direct (eventually ovelapping) seq
-			if(DEBUG) printf("searching for direct (eventually ovelapping) seq\n");
 			maxSuffix=0;
 			maxPrefix=0;
 			//using direct from actual (forward parsing)
-			tmp_node=st_root;
-			tmp_depth=0;
-			st_matchTmp=0;
-			while(at+maxSuffix<trueStringLength && (tmp_node=st_match(tmp_node, t[at+maxSuffix], s))!=NULL) maxSuffix++;
+			initialize_new_match(search_source_direct);
+			initialize_new_match(search_source_reverse);
+			if(check_target_repetitions) {
+				initialize_new_match(search_target_direct);
+				initialize_new_match(search_target_reverse);
+				while(at+maxSuffix<trueStringLength && composite_match_target_check(search_source_direct, search_source_reverse, search_target_direct, search_target_reverse, t[at+maxSuffix])) maxSuffix++;
+				}
+			else {
+				while(at+maxSuffix<trueStringLength && composite_match(search_source_direct, search_source_reverse, t[at+maxSuffix])) maxSuffix++;
+				}
 			if(maxSuffix>=l) {
 				//direct sequence found
 				found=true;
@@ -319,21 +428,31 @@ int main(int argc, char *argv[]) {
 			else {
 				if(DEBUG) printf("compute maxPrefix\n");
 				//using reverse from actual (backward parsing)
-				tmp_node=rst_root;
-				tmp_depth=0;
-				st_matchTmp=0;
-				while(maxPrefix<l && at-maxPrefix>=0 && (tmp_node=st_match(tmp_node, complement[t[at-maxPrefix]], rs))!=NULL) maxPrefix++;
+				initialize_new_match(search_source_direct);
+				initialize_new_match(search_source_reverse);
+				if(check_target_repetitions) {
+					initialize_new_match(search_target_direct);
+					initialize_new_match(search_target_reverse);
+					while(maxPrefix<l && at-maxPrefix>=0 && composite_match_target_check(search_source_direct, search_source_reverse, search_target_direct, search_target_reverse, complement[t[at-maxPrefix]])) maxPrefix++;
+					}
+				else {
+					while(maxPrefix<l && at-maxPrefix>=0 && composite_match(search_source_direct, search_source_reverse, complement[t[at-maxPrefix]])) maxPrefix++;
+					}
 				maxPrefix--;
-				int ite=0;
 				while(!found && maxPrefix+maxSuffix>=l) {
 					if(DEBUG) printf("*ite %d-%d\n", maxPrefix, maxSuffix);
-					if(ite++>8) exit(1);
 					i=maxSuffix-l;
 					//using direct from actual (forward parsing)
-					tmp_node=st_root;
-					tmp_depth=0;
-					st_matchTmp=0;
-					while(at+i<trueStringLength && (tmp_node=st_match(tmp_node, t[at+i], s))!=NULL) i++;
+					initialize_new_match(search_source_direct);
+					initialize_new_match(search_source_reverse);
+					if(check_target_repetitions) {
+						initialize_new_match(search_target_direct);
+						initialize_new_match(search_target_reverse);
+						while(at+i<trueStringLength && composite_match_target_check(search_source_direct, search_source_reverse, search_target_direct, search_target_reverse, t[at+i])) i++;
+						}
+					else {
+						while(at+i<trueStringLength && composite_match(search_source_direct, search_source_reverse, t[at+i])) i++;
+						}
 					if(i==maxSuffix) {
 						//direct sequence found
 						found=true;
@@ -349,125 +468,22 @@ int main(int argc, char *argv[]) {
 					shiftTo=at+1;
 					}
 				}
-			//searching for reverse (eventually ovelapping) seq
-			if(DEBUG) printf("searching for reverse (eventually ovelapping) seq\n");
-			maxSuffix=0;
-			maxPrefix=0;
-			//using reverse from actual (forward parsing)
-			tmp_node=rst_root;
-			tmp_depth=0;
-			st_matchTmp=0;
-			while(at+maxSuffix<trueStringLength && (tmp_node=st_match(tmp_node, t[at+maxSuffix], rs))!=NULL) maxSuffix++;
-			if(maxSuffix>=l) {
-				//direct sequence found
-				foundR=true;
-				shiftToR=at+maxSuffix;
-				if(DEBUG) printf("1############################################found [%d -> %d]\n", at, shiftTo);
-				}
-			else {
-				if(DEBUG) printf("compute maxPrefix\n");
-				//using direct from actual (backward parsing)
-				tmp_node=st_root;
-				tmp_depth=0;
-				st_matchTmp=0;
-				while(maxPrefix<l && at-maxPrefix>=0 && (tmp_node=st_match(tmp_node, complement[t[at-maxPrefix]], s))!=NULL) maxPrefix++;
-				maxPrefix--;
-				while(!foundR && maxPrefix+maxSuffix>=l) {
-					if(DEBUG) printf("#ite\n");
-					i=maxSuffix-l;
-					//using reverse from actual (forward parsing)
-					tmp_node=rst_root;
-					tmp_depth=0;
-					st_matchTmp=0;
-					while(at+i<trueStringLength && (tmp_node=st_match(tmp_node, t[at+i], rs))!=NULL) i++;
-					if(i==maxSuffix) {
-						//direct sequence found
-						foundR=true;
-						shiftToR=at+maxSuffix;
-						}
-					else maxSuffix=i;
-					}
-				if(!foundR) {
-					//not found
-					shiftToR=at+1;
-					}
-				}
 			}
-		if(!found && !foundR) {
-			if(shiftToR==shiftTo) at=shiftTo;
-			else {
-				if(shiftToR<shiftTo) {
-					at=shiftToR;
-					dontdo=true;
-					}
-				else {
-					at=shiftTo;
-					dontdoR=true;
-					}
-				}
-			state=0;
-			}
-		if(found && foundR) {
-			if(shiftToR<shiftTo) {
-				if(fileoutput) {
-					fprintf(output_file, "%i,", at);
-					if(state==1) fprintf(output_file, "*");
-					for(int j=at;j<shiftTo;j++) fprintf(output_file, "%c", base2char[t[j]]);
-					fprintf(output_file, ",direct\n");
-					}
-/*				printf("%d,direct,", subSeqId++);
-				for(int j=at;j<shiftTo;j++) printf("%c", base2char[t[j]]);
-				if(state==1) printf(",<=%d,%d\n", at, shiftTo-1);
-				else printf(",%d,%d\n", at, shiftTo-1);*/
-				coverage+=shiftTo-at;
-				at=shiftTo;
-				}
-			else {
-				if(fileoutput) {
-					fprintf(output_file, "%i,", at);
-					if(state==1) fprintf(output_file, "*");
-					for(int j=at;j<shiftToR;j++) fprintf(output_file, "%c", base2char[t[j]]);
-					fprintf(output_file, ",reverse\n");
-					}
-/*				printf("%d,reverse,", subSeqId++);
-				for(int j=at;j<shiftToR;j++) printf("%c", base2char[t[j]]);
-				if(state==1) printf(",<=%d,%d\n", at, shiftToR-1);
-				else printf(",%d,%d\n", at, shiftToR-1);*/
-				coverage+=shiftToR-at;
-				at=shiftToR;
-				}
-			state=1;
-			}
-		if(found && !foundR) {
+
+		if(found) {
 			if(fileoutput) {
 				fprintf(output_file, "%i,", at);
 				if(state==1) fprintf(output_file, "*");
 				for(int j=at;j<shiftTo;j++) fprintf(output_file, "%c", base2char[t[j]]);
-				fprintf(output_file, ",direct\n");
+				if(check_target_repetitions) fprintf(output_file, ",direct-reverse:%d-%d,targetrepetitionsdirect-reverse:%d-%d\n", last_valid_direct_count, last_valid_reverse_count, last_valid_direct_count_target, last_valid_reverse_count_target);
+				else fprintf(output_file, ",direct-reverse:%d-%d\n", last_valid_direct_count, last_valid_reverse_count);
 				}
-/*			printf("%d,direct,", subSeqId++);
-			for(int j=at;j<shiftTo;j++) printf("%c", base2char[t[j]]);
-			if(state==1) printf(",<=%d,%d\n", at, shiftTo-1);
-			else printf(",%d,%d\n", at, shiftTo-1);*/
 			coverage+=shiftTo-at;
-			at=shiftTo;
 			state=1;
 			}
-		if(!found && foundR) {
-			if(fileoutput) {
-				fprintf(output_file, "%i,", at);
-				if(state==1) fprintf(output_file, "*");
-				for(int j=at;j<shiftToR;j++) fprintf(output_file, "%c", base2char[t[j]]);
-				fprintf(output_file, ",reverse\n");
-				}
-/*			printf("%d,reverse,", subSeqId++);
-			for(int j=at;j<shiftToR;j++) printf("%c", base2char[t[j]]);
-			if(state==1) printf(",<=%d,%d\n", at, shiftToR-1);
-			else printf(",%d,%d\n", at, shiftToR-1);*/
-			coverage+=shiftToR-at;
-			at=shiftToR;
-			state=1;
-			}
+		else state=0;
+
+		at=shiftTo;
 		if(at>=trueStringLength) end=true;
 		}
 
@@ -497,6 +513,13 @@ int main(int argc, char *argv[]) {
 	exit(EXIT_SUCCESS);
 	}
 
+void initialize_new_match(st_search* match_struct) {
+	match_struct->current_node=match_struct->root;
+	match_struct->current_depth=0;
+	match_struct->current_edge_depth=0;
+	match_struct->current_count=1;
+	}
+
 void intestation() {
 	if(system("clear")==-1) {
 		fprintf(stderr, "failed system call\n");
@@ -508,9 +531,9 @@ void intestation() {
 	printf(" * with minimum length \"l\", with at least \"minRep\" occurrences in S,\n");
 	printf(" * possibly overlapped, and, in such a maximum coverage, minimize the\n");
 	printf(" * number of subsequences used.\n");
-	printf(" * version 1.5\n");
+	printf(" * version 1.6\n");
 	printf(" *\n");
-	printf(" * Copyright (C) 2003-2011 Claudio Felicioli\n");
+	printf(" * Copyright (C) 2003-2012 Claudio Felicioli\n");
 	printf(" * mail: c.felicioli@1d20.net - pangon@gmail.com\n");
 	printf(" *\n");
 	printf(" * bpmatch is free software; you can redistribute it and/or modify\n");
@@ -577,41 +600,61 @@ void st_unserialize_edge(FILE* file, st_edge* edge, st_node** leaves) {
 	st_unserialize_node(file, edge->to, leaves);
 	}
 
-//st_edge* st_lastEdge;
-//int st_matchTmp;
-//int tmp_depth;
+bool composite_match(st_search* suffix_tree_a, st_search* suffix_tree_b, bpmatch_utils_base base) {
+	suffix_tree_a->current_count=single_match(suffix_tree_a, base);
+	suffix_tree_b->current_count=single_match(suffix_tree_b, base);
+	if(suffix_tree_a->current_count+suffix_tree_b->current_count>=minRep) {
+		last_valid_direct_count=suffix_tree_a->current_count;
+		last_valid_reverse_count=suffix_tree_b->current_count;
+		return(true);
+		}
+	return(false);
+	}
 
-st_node* st_match(st_node* node, bpmatch_utils_base base, bpmatch_utils_base* string) {
-	if(DEBUG) printf("match %c [node leafId=%d]\n", base2char[base], node->leafId);
-//	if(DEBUG) if(node->lastLeaf-node->firstLeaf<20) st_print(node);
-	if(base==X) return(NULL);
-	if(node->leafId==0) {
+bool composite_match_target_check(st_search* suffix_tree_a, st_search* suffix_tree_b, st_search* suffix_tree_c, st_search* suffix_tree_d, bpmatch_utils_base base) {
+	suffix_tree_a->current_count=single_match(suffix_tree_a, base);
+	suffix_tree_b->current_count=single_match(suffix_tree_b, base);
+	suffix_tree_c->current_count=single_match(suffix_tree_c, base);
+	suffix_tree_d->current_count=single_match(suffix_tree_d, base);
+	if(suffix_tree_a->current_count+suffix_tree_b->current_count>=minRep && suffix_tree_c->current_count+suffix_tree_d->current_count>=minRep2) {
+		last_valid_direct_count=suffix_tree_a->current_count;
+		last_valid_reverse_count=suffix_tree_b->current_count;
+		last_valid_direct_count_target=suffix_tree_c->current_count;
+		last_valid_reverse_count_target=suffix_tree_d->current_count;
+		return(true);
+		}
+	return(false);
+	}
+
+int single_match(st_search* suffix_tree, bpmatch_utils_base base) {
+	if(suffix_tree->current_count==0) return(0);
+	if(DEBUG) printf("match %c [node leafId=%d]\n", base2char[base], suffix_tree->current_node->leafId);
+	if(base==X) return(0);
+	if(suffix_tree->current_node->leafId==0) {
 		//internal node
-		if(st_matchTmp<tmp_depth) {
-			st_matchTmp++;
-			if(string[st_lastEdge->start+st_matchTmp]!=base) return(NULL);
-			return(node);
+		if(suffix_tree->current_depth<suffix_tree->current_edge_depth) {
+			suffix_tree->current_depth++;
+			if(suffix_tree->string[suffix_tree->current_edge->start+suffix_tree->current_depth]!=base) return(0);
+			return(suffix_tree->current_count);
 			}
 		else {
-			if(node->edges[base]==NULL) return(NULL);
-			if(node->edges[base]->count<minRep) return(NULL);
-			if(DEBUG) printf("OK-%d (not leaf)\n", node->edges[base]->count);
-			st_lastEdge=node->edges[base];
-			tmp_depth=st_lastEdge->end-st_lastEdge->start;
-			st_matchTmp=0;
-			return(node->edges[base]->to);
+			if(suffix_tree->current_node->edges[base]==NULL) return(0);
+			if(DEBUG) printf("OK-%d (not leaf)\n", suffix_tree->current_node->edges[base]->count);
+			suffix_tree->current_edge=suffix_tree->current_node->edges[base];
+			suffix_tree->current_edge_depth=suffix_tree->current_edge->end-suffix_tree->current_edge->start;
+			suffix_tree->current_depth=0;
+			suffix_tree->current_node=suffix_tree->current_edge->to;
+			return(suffix_tree->current_edge->count);
 			}
 		}
 	else {
 		//leaf
-		st_matchTmp++;
-		if(1<minRep) return(NULL);
-		if(DEBUG) printf("LEAF: %c\n", base2char[string[st_lastEdge->start+st_matchTmp]]);
-		if(string[st_lastEdge->start+st_matchTmp]!=base) return(NULL);
+		suffix_tree->current_depth++;
+		if(DEBUG) printf("LEAF: %c\n", base2char[suffix_tree->string[suffix_tree->current_edge->start+suffix_tree->current_depth]]);
+		if(suffix_tree->string[suffix_tree->current_edge->start+suffix_tree->current_depth]!=base) return(0);
 		if(DEBUG) printf("OK-1 (leaf)\n");
-		return(node);
+		return(1);
 		}
-//	if(DEBUG) printf("%c found (rep %d)\n", base2char[base], node->edges[base]->count);
 	}
 
 void st_print(st_node* node) {
