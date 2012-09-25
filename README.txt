@@ -56,6 +56,6 @@ Finally you can execute BpMatch, in this example the minimum length of segments 
 The simple output is the covered ratio.
 
 For an extended detailed output of the coverage you need to pass one more parameter:
-> ./bpmatch S.st S_r.st T.dna 10 3 coverage.txt
-A file named coverage.txt is created with the detailed output
+> ./bpmatch S.st S_r.st T.dna 10 3 coverage
+Two files named coverage.log and coverage.pieces are created with the detailed output
 

@@ -30,6 +30,8 @@
 #include <math.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <string>
+#include <set>
 #define DEBUG (false)
 
 
@@ -63,6 +65,7 @@ struct st_search {
 
 bpmatch_utils_base complement[5];
 char base2char[5];
+bpmatch_utils_base char2base['z'];
 
 void intestation();
 void st_unserialize_node(FILE* file, st_node* node, st_node** leaves);
@@ -97,6 +100,7 @@ FILE* st2_file;
 FILE* rst2_file;
 FILE* target_file;
 FILE* output_file;
+FILE* output_file_pieces;
 int stringLength;
 bpmatch_utils_base* s;
 bpmatch_utils_base* rs;
@@ -114,6 +118,9 @@ int at;
 bool fileoutput;
 bool scanBp_fasta;
 bool check_target_repetitions;
+std::set<std::string> covering_pieces;
+std::set<std::string>::iterator covering_pieces_ite;
+char* tmp_piece;
 
 int main(int argc, char *argv[]) {
 	if(argc!=6 && argc!=7 && argc!=8 && argc!=9) {
@@ -130,6 +137,7 @@ int main(int argc, char *argv[]) {
 	rst_fileName[49]='\0';
 
 	fileoutput=(argc==7 || argc==9);
+	if(fileoutput) covering_pieces.clear();
 
 	if(check_target_repetitions) {
 		strncpy(st2_fileName, argv[3], 49);
@@ -155,7 +163,31 @@ int main(int argc, char *argv[]) {
 
 	if(fileoutput) {
 		output_fileName[99]='\0';
+		int filename_length=strlen(output_fileName);
+		if(filename_length>90) {
+			fprintf(stderr, "error: \"%s\" is too much long, use a prefix shorter 90 characters or less\n", output_fileName);
+			exit(EXIT_FAILURE);
+			}
+
+		output_fileName[filename_length]='.';
+		output_fileName[filename_length+1]='l';
+		output_fileName[filename_length+2]='o';
+		output_fileName[filename_length+3]='g';
+		output_fileName[filename_length+4]='\0';
 		if((output_file=fopen(output_fileName, "w"))==NULL) {
+			fprintf(stderr, "error: %s opening fail\n", output_fileName);
+			exit(EXIT_FAILURE);
+			}
+
+		output_fileName[filename_length]='.';
+		output_fileName[filename_length+1]='p';
+		output_fileName[filename_length+2]='i';
+		output_fileName[filename_length+3]='e';
+		output_fileName[filename_length+4]='c';
+		output_fileName[filename_length+5]='e';
+		output_fileName[filename_length+6]='s';
+		output_fileName[filename_length+7]='\0';
+		if((output_file_pieces=fopen(output_fileName, "w"))==NULL) {
 			fprintf(stderr, "error: %s opening fail\n", output_fileName);
 			exit(EXIT_FAILURE);
 			}
@@ -172,6 +204,11 @@ int main(int argc, char *argv[]) {
 	base2char[T]='T';
 	base2char[C]='C';
 	base2char[X]='X';
+	char2base['A']=A;
+	char2base['G']=G;
+	char2base['T']=T;
+	char2base['C']=C;
+	char2base['X']=X;
 //	printf("Loading %s.\n", st_fileName);
 	if((st_file=fopen(st_fileName, "r"))==NULL) {
 		fprintf(stderr, "error: %s opening fail\n", st_fileName);
@@ -334,6 +371,8 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
+	if(fileoutput) tmp_piece=new char[trueStringLength+1];
+
 //	printf("\n");
 //	printf("*************************************************\n");
 //	printf("matching - l=%d - minRep=%d\n", l, minRep);
@@ -473,10 +512,19 @@ int main(int argc, char *argv[]) {
 		if(found) {
 			if(fileoutput) {
 				fprintf(output_file, "%i,", at);
-				if(state==1) fprintf(output_file, "*");
+				if(state==1) {
+					fprintf(output_file, "*");
+					for(int j=shiftTo-l;j<shiftTo;j++) tmp_piece[j-shiftTo+l]=base2char[t[j]];
+					tmp_piece[l]='\0';
+					}
+				else {
+					for(int j=at;j<shiftTo;j++) tmp_piece[j-at]=base2char[t[j]];
+					tmp_piece[shiftTo-at]='\0';
+					}
 				for(int j=at;j<shiftTo;j++) fprintf(output_file, "%c", base2char[t[j]]);
 				if(check_target_repetitions) fprintf(output_file, ",direct-reverse:%d-%d,targetrepetitionsdirect-reverse:%d-%d\n", last_valid_direct_count, last_valid_reverse_count, last_valid_direct_count_target, last_valid_reverse_count_target);
 				else fprintf(output_file, ",direct-reverse:%d-%d\n", last_valid_direct_count, last_valid_reverse_count);
+				covering_pieces.insert(std::string(tmp_piece));
 				}
 			coverage+=shiftTo-at;
 			state=1;
@@ -497,6 +545,98 @@ int main(int argc, char *argv[]) {
 			fprintf(stderr, "failed fclose of output");
 			exit(EXIT_FAILURE);
 			}
+
+		int search_index;
+		for(covering_pieces_ite=covering_pieces.begin();covering_pieces_ite!=covering_pieces.end();covering_pieces_ite++) {
+			fprintf(output_file_pieces, "SEGMENT: %s\n", covering_pieces_ite->data());
+
+			fprintf(output_file_pieces, "sources direct occurrences by starting index ");
+			initialize_new_match(search_source_direct);
+			search_index=0;
+			while((*covering_pieces_ite)[search_index]!='\0') search_source_direct->current_count=single_match(search_source_direct, char2base[(int)(*covering_pieces_ite)[search_index++]]);
+			fprintf(output_file_pieces, "(%d) :", search_source_direct->current_count);
+			if(search_source_direct->current_count>0) {
+				if(search_source_direct->current_node->leafId==0) {
+					//internal node
+					for(int i=search_source_direct->current_node->firstLeaf;i<=search_source_direct->current_node->lastLeaf;i++) {
+						fprintf(output_file_pieces, " %d", st_root->lastLeaf-st_leaves[i]->length);
+						}
+					}
+				else {
+					//leaf
+					fprintf(output_file_pieces, " %d", st_root->lastLeaf-search_source_direct->current_node->length);
+					}
+				}
+			fprintf(output_file_pieces, "\n");
+
+			fprintf(output_file_pieces, "sources reverse occurrences by starting index ");
+			initialize_new_match(search_source_reverse);
+			search_index=0;
+			while((*covering_pieces_ite)[search_index]!='\0') search_source_reverse->current_count=single_match(search_source_reverse, char2base[(int)(*covering_pieces_ite)[search_index++]]);
+			fprintf(output_file_pieces, "(%d) :", search_source_reverse->current_count);
+			if(search_source_reverse->current_count>0) {
+				if(search_source_reverse->current_node->leafId==0) {
+					//internal node
+					for(int i=search_source_reverse->current_node->firstLeaf;i<=search_source_reverse->current_node->lastLeaf;i++) {
+						fprintf(output_file_pieces, " %d", st_root->lastLeaf-st_leaves[i]->length);
+						}
+					}
+				else {
+					//leaf
+					fprintf(output_file_pieces, " %d", st_root->lastLeaf-search_source_reverse->current_node->length);
+					}
+				}
+			fprintf(output_file_pieces, "\n");
+
+			if(check_target_repetitions) {
+				fprintf(output_file_pieces, "target direct occurrences by starting index ");
+				initialize_new_match(search_target_direct);
+				search_index=0;
+				while((*covering_pieces_ite)[search_index]!='\0') search_target_direct->current_count=single_match(search_target_direct, char2base[(int)(*covering_pieces_ite)[search_index++]]);
+				fprintf(output_file_pieces, "(%d) :", search_target_direct->current_count);
+				if(search_target_direct->current_count>0) {
+					if(search_target_direct->current_node->leafId==0) {
+						//internal node
+						for(int i=search_target_direct->current_node->firstLeaf;i<=search_target_direct->current_node->lastLeaf;i++) {
+							fprintf(output_file_pieces, " %d", st2_root->lastLeaf-st_leaves[i]->length);
+							}
+						}
+					else {
+						//leaf
+						fprintf(output_file_pieces, " %d", st2_root->lastLeaf-search_target_direct->current_node->length);
+						}
+					}
+				fprintf(output_file_pieces, "\n");
+
+				fprintf(output_file_pieces, "target reverse occurrences by starting index ");
+				initialize_new_match(search_target_reverse);
+				search_index=0;
+				while((*covering_pieces_ite)[search_index]!='\0') search_target_reverse->current_count=single_match(search_target_reverse, char2base[(int)(*covering_pieces_ite)[search_index++]]);
+				fprintf(output_file_pieces, "(%d) :", search_target_reverse->current_count);
+				if(search_target_reverse->current_count>0) {
+					if(search_target_reverse->current_node->leafId==0) {
+						//internal node
+						for(int i=search_target_reverse->current_node->firstLeaf;i<=search_target_reverse->current_node->lastLeaf;i++) {
+							fprintf(output_file_pieces, " %d", st2_root->lastLeaf-st_leaves[i]->length);
+							}
+						}
+					else {
+						//leaf
+						fprintf(output_file_pieces, " %d", st2_root->lastLeaf-search_target_reverse->current_node->length);
+						}
+					}
+				fprintf(output_file_pieces, "\n");
+				}
+
+			fprintf(output_file_pieces, "\n");
+			}
+
+		if(fclose(output_file_pieces)!=0) {
+			fprintf(stderr, "failed fclose of output");
+			exit(EXIT_FAILURE);
+			}
+
+		delete[] tmp_piece;
 		}
 
 //	printf("\ncoverage: %d/%d\n", coverage, trueStringLength, subSeqId);
@@ -508,7 +648,15 @@ int main(int argc, char *argv[]) {
 	st_free_node(rst_root);
 	delete[] s;
 	delete[] rs;
+	if(check_target_repetitions) {
+		delete[] st2_leaves;
+		st_free_node(st2_root);
+		delete[] rst2_leaves;
+		st_free_node(rst2_root);
+		delete[] rt;
+		}
 	delete[] t;
+
 //	printf("termination reached without errors\n");
 	exit(EXIT_SUCCESS);
 	}
