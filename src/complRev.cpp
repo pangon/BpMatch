@@ -63,8 +63,8 @@ int main(int argc, char *argv[]) {
 	struct stat inputInfo;
 	stat(inputName, &inputInfo);
 	int l=inputInfo.st_size;
-	bpmatch_utils_base s[l];
-	bpmatch_utils_base s2[l];
+	bpmatch_utils_base* s=new bpmatch_utils_base[l];
+	bpmatch_utils_base* s2=new bpmatch_utils_base[l];
 	bpmatch_utils_base bp;
 	int trueL=0;
 	scanBp_fasta=false;
@@ -101,6 +101,8 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "failed fclose of gene");
 		exit(EXIT_FAILURE);
 		}
+	delete[] s;
+	delete[] s2;
 	}
 
 int scanBp(FILE* file, bpmatch_utils_base* bp) {
